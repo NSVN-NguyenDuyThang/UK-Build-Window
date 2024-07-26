@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+
+<module xmlns="urn:jboss:module:1.1" name="com.microsoft.sqlserver.jdbc">
+    <dependencies>
+        <module name="javax.api" export="true"/>
+    </dependencies>
+    <resources>
+        <resource-root path="sqljdbc42.jar"/>
+    </resources>
+</module>

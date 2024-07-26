@@ -1,0 +1,17 @@
+version: "3"
+services:
+  mssql:
+    env_file:
+      - .env
+    build:
+        context: ./build/
+        args:
+          - ACCEPT_EULA=${ACCEPT_EULA}
+          - MSSQL_PID=${MSSQL_PID}
+          - SA_PASSWORD=${SA_PASSWORD}
+    image: '${MSSQL_IMAGE_NAME}:${MSSQL_TAG}'
+    container_name: ${MSSQL_CONTAINER_NAME}
+    ports:
+      - 1433:1433
+    expose:
+      - 1433

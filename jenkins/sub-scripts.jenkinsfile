@@ -1,0 +1,301 @@
+pipeline {
+	environment {
+		GG_SHEET_DEPL=''
+		REGISTRY_SERVER='192.168.100.249:5000'
+		REGISTRY_USERNAME='admin'
+		REGISTRY_PASSWORD='123456'
+		WILDFLY_UK_IMAGE_NAME='wildfly-uk'
+	}
+    agent any
+    stages {
+		stage('Setup parameters') {
+			when {
+				expression { env.BUILD_NUMBER == '1'}
+			}
+			steps {
+				script {
+					try {
+						setupParam()	
+					} catch (e) {
+						updateGoogleSheet(env.WILDFLY_UK_IMAGE_TAG, 'Failed', '', '')
+						throw e
+					}	
+				}
+			}
+		}				
+		
+		stage('Checkout UK source code') {
+			steps {
+				script {
+					try {
+						dir (/UkSource/) {
+							checkout([$class: 'GitSCM', branches: [[name: env.UK_BRANCH ]],
+								userRemoteConfigs: [[url: '']]
+							])
+						}
+					} catch (e) {
+						updateGoogleSheet(env.WILDFLY_UK_IMAGE_TAG, 'Failed', '', '')
+						throw e
+					}
+				}
+			}
+		}
+		
+		stage('Build UK Source') {
+			steps {
+				script {
+					try {
+						updateGoogleSheet(env.WILDFLY_UK_IMAGE_TAG, 'Running', '', '')
+						dir(/UkSource/) {
+						echo "Build UK Source"
+							buildTSC()
+							buildSource()
+						}
+					} catch (e) {
+						updateGoogleSheet(env.WILDFLY_UK_IMAGE_TAG, 'Failed', '', '')
+						throw e
+					}
+				}
+				
+			}
+		}
+		
+		stage('Build Wildfly UK') {
+			steps {
+				script {
+					try {
+						dir(/UkWildfly/) {
+							dir(/build/) {
+								bat 'del /s /q deployments\\*'
+							}
+						}
+						bat 'copy UkSource\\nts.uk\\uk.base\\base.web\\nts.uk.com.js.web\\build\\libs\\*.war UKWildfly\\build\\deployments\\'
+						bat 'copy UkSource\\nts.uk\\uk.com\\com.web\\nts.uk.com.web\\build\\libs\\*.war UKWildfly\\build\\deployments\\'
+						bat 'copy UkSource\\nts.uk\\uk.at\\at.web\\nts.uk.at.web\\build\\libs\\*.war UKWildfly\\build\\deployments\\'
+						bat 'copy UkSource\\nts.uk\\uk.mobile\\wwwroot\\*.war UKWildfly\\build\\deployments\\'
+						dir(/UkWildfly/) {
+							dir(/build/) {
+								echo "Build Wildfly UK Image"
+								buildWildflyUkImage()
+							}
+						}
+						bat """
+						echo @ECHO OFF > %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO ------------------------------------------------------------------------------------------------------------------- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO - 																												- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO -                                 FINAL STEP: Run UK image														- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO -																													- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO ------------------------------------------------------------------------------------------------------------------- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO - 																												- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO  Change database information																						- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    1. DB_TYPE - Type of DBMS. postgresql or sqlserver value														- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    2. DB_SERVER - Address of database server. Ex: 192.168.100.249:5433											- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    3. DB_USER - User of database server																			- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    4. DB_PASSWORD - Password of database server																	- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    5. DB_NAME - name of database which need connect to															- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    6. -p xxxx:8080 - port will be run UK deployments. Ex: 8000:8080 - open port 8000 to run UK					- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO    7. -p xxxx:9990 - port will be run Wildfly Management. Ex: 9990:9990 - open port 9990 to run Wildfly Management- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO -																													- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO ------------------------------------------------------------------------------------------------------------------- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo docker rm uk-%WILDFLY_UK_IMAGE_TAG% -f >> %WILDFLY_UK_IMAGE_TAG%.bat																						
+						echo docker rmi %REGISTRY_SERVER%/%WILDFLY_UK_IMAGE_NAME%:%WILDFLY_UK_IMAGE_TAG% -f >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo docker login %REGISTRY_SERVER% -u %REGISTRY_USERNAME% -p %REGISTRY_PASSWORD% >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo docker run -it -d --rm -e DB_TYPE=%DB_TYPE% -e DB_SERVER=%DB_SERVER% -e DB_USER=%DB_USER% -e DB_PASSWORD=%DB_PASSWORD% -e DB_NAME=%DB_NAME% -p 8000:8080 -p 9990:9990 --name=uk-%WILDFLY_UK_IMAGE_TAG% %REGISTRY_SERVER%/%WILDFLY_UK_IMAGE_NAME%:%WILDFLY_UK_IMAGE_TAG% >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO ------------------------------------------------------------------------------------------------------------------- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO -																													- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO - 'DONE! CHECK BUGssssss, PLEASE!!!'																				- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO -																													- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						echo ECHO ------------------------------------------------------------------------------------------------------------------- >> %WILDFLY_UK_IMAGE_TAG%.bat
+						"""
+					} catch(e) {
+						updateGoogleSheet(env.WILDFLY_UK_IMAGE_TAG, 'Failed', '', '')
+						throw e
+					}
+				}
+				
+			}
+		}
+		stage('Push .bat file') {
+			steps {
+				script {
+					try {
+						bat 'copy %WILDFLY_UK_IMAGE_TAG%.bat D:\\UK_Run_Image'
+						bat 'del /s/q %WILDFLY_UK_IMAGE_TAG%.bat'
+					} catch(e) {
+						println 'Error when push .bat file. Manually create .bat file to run image'
+					}
+				}
+				
+			}
+		}
+    }
+}
+
+// TSC build
+def buildTSC(){
+	dir(/nts.uk/){
+		dir(/uk.com/){
+			bat './gradlew tsc'
+		}
+		dir(/uk.at/){
+			bat './gradlew tsc'
+		}
+	}
+}
+
+def buildSource(){
+    buildPC()
+    buildMobile()
+}
+
+def buildPC(){	
+	if (fileExists('\\nts.uk\\uk.repo\\nts.uk.ctx.pr.core.ac.jar')) {
+		echo 'No Copy repo'
+	} else {
+		echo 'Copy base repo from release_ver4'
+		bat 'copy %workspace%\\UkWildfly\\v4_repo\\*.jar nts.uk\\uk.repo\\'
+	}
+	dir(/nts.uk/){
+	    try{
+            dir(/uk.com/){
+                bat './gradlew initd'
+            }
+        }
+    	catch(Exception err){
+        }
+
+        try{
+			dir(/uk.at/){
+				bat './gradlew initd --no-daemon'
+			}
+        }
+        catch(Exception err){
+        }
+
+        try{
+			dir(/uk.com/){
+				bat './gradlew upver'
+			}
+		}catch(Exception ex){
+			
+		}
+		try{
+			dir(/uk.at/){
+                bat './gradlew upver'
+			}
+		}catch(Exception ex){
+			
+		}
+    
+		dir(/uk.com/){
+			bat './gradlew initd'
+		}
+
+		dir(/uk.at/){
+			bat './gradlew initd --no-daemon'
+		}
+
+        dir(/uk.com/){
+			bat './gradlew upver'
+		}
+
+		dir(/uk.at/){
+			bat './gradlew upver'
+		}
+		
+		dir(/uk.base/){
+			bat 'gradlew war'
+		}
+		dir(/uk.com/){
+			bat 'gradlew war'
+		}
+		dir(/uk.at/){
+			bat 'gradlew war'
+		}
+    }
+}
+
+def buildMobile(){
+    if (fileExists('\\nts.uk\\uk.mobile\\wwwroot\\index.html')) {
+		echo 'No Build Mobile First Time !'
+	} else {
+		echo 'Build Mobile for first time !'
+		dir(/nts.uk/){
+			dir(/uk.mobile/){
+				bat 'npm i'
+			}
+			dir(/uk.mobile/){
+				bat 'npm run webpack:vendor'
+			}
+			dir(/uk.mobile/){
+				bat 'npm run webpack'
+			}
+		}
+	}
+    dir(/nts.uk/){
+        dir(/uk.mobile/){
+                bat 'npm i'
+        }
+        dir(/uk.mobile/){
+            bat 'rd /s /q wwwroot'
+        }
+        dir(/uk.mobile/){
+            bat 'npm run webpack:vendor:prod'
+        }
+        dir(/uk.mobile/){
+            bat 'npm run webpack:prod'
+        }
+    }
+
+}
+
+def buildWildflyUkImage() {	
+	if(env.WILDFLY_UK_IMAGE_TAG == "") {
+		throw new Exception('WILDFLY_UK_IMAGE_TAG is empty!')
+	}
+	// build
+	def STATUS_CODE = bat ( script: """
+								docker image rm %WILDFLY_UK_IMAGE_NAME%:%WILDFLY_UK_IMAGE_TAG% -f
+								docker build -t  %REGISTRY_SERVER%/%WILDFLY_UK_IMAGE_NAME%:%WILDFLY_UK_IMAGE_TAG% .
+								docker login %REGISTRY_SERVER% -u %REGISTRY_USERNAME% -p %REGISTRY_PASSWORD%
+								docker push %REGISTRY_SERVER%/%WILDFLY_UK_IMAGE_NAME%:%WILDFLY_UK_IMAGE_TAG%
+							""", 
+						returnStatus: true )
+	bat 'docker image rm %REGISTRY_SERVER%/%WILDFLY_UK_IMAGE_NAME%:%WILDFLY_UK_IMAGE_TAG% -f'
+	println STATUS_CODE
+	if (STATUS_CODE  == 0) {
+		updateGoogleSheet(env.WILDFLY_UK_IMAGE_TAG, 'Success', env.WILDFLY_UK_IMAGE_NAME + ':' + env.WILDFLY_UK_IMAGE_TAG, java.time.LocalDateTime.now())
+	} else {
+		throw new Exception('Build image failed!')
+	}	
+}
+
+def updateGoogleSheet(redmineId, status, imageInfo, lastSuccessTime) {
+	def buildUrl = env.BUILD_URL
+	bat """
+        echo 'Update google sheet'
+		set API="https://script.google.com/macros/s/%GG_SHEET_DEPL%/exec?redmineId=$redmineId&buildStatus=$status&imageInfo=$imageInfo&lastSuccessTime=$lastSuccessTime&buildUrl=$buildUrl"
+        echo %API%
+		curl -sS -H "Accept: application/json" -X GET %API%
+
+        """
+}
+
+def setupParam(){
+    properties([parameters([
+		separator(sectionHeader: 'UK Branch', sectionHeaderStyle: 'font-weight: bold; text-transform: uppercase; font-size: 1.3 rem'),
+		string(defaultValue: 'TeamD/auto/thangnd', description: 'UK branch for build', name: 'UK_BRANCH'),
+		
+		separator(sectionHeader: "UK Image Setting", sectionHeaderStyle: 'font-weight: bold; text-transform: uppercase; font-size: 1.3 rem'),
+		string(defaultValue: '', description: 'Wildfly UK image tag (ref: Redmine ID)', name: 'WILDFLY_UK_IMAGE_TAG'),
+		
+		separator(sectionHeader: "Database Information", sectionHeaderStyle: 'font-weight: bold; text-transform: uppercase; font-size: 1.3 rem'),
+		choice(choices: ['postgresql', 'sqlserver'], name: 'DB_TYPE'),
+		string(description: 'Database server. Ex: 192.168.100.249:1433', name: 'DB_SERVER'),
+		string(description: 'Database user', name: 'DB_USER'),
+        string(description: 'Password for database user', name: 'DB_PASSWORD'),
+		string(description: 'Database name', name: 'DB_NAME'),
+		])
+	])
+}
+

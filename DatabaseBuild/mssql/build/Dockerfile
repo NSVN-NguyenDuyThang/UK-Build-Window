@@ -1,0 +1,16 @@
+FROM mcr.microsoft.com/mssql/server:2022-latest
+USER root
+ARG SA_PASSWORD
+ARG ACCEPT_EULA
+ARG MSSQL_PID
+
+ENV ACCEPT_EULA $ACCEPT_EULA
+ENV SA_PASSWORD $SA_PASSWORD
+ENV MSSQL_PID $MSSQL_PID
+
+WORKDIR /usr/src/app
+COPY . /usr/src/app 
+
+EXPOSE 1433
+
+CMD /bin/bash ./entrypoint.sh 

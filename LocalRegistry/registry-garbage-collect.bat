@@ -1,0 +1,1 @@
+docker exec -it local-registry /bin/registry garbage-collect --delete-untagged=true --dry-run=false /etc/docker/registry/config.yml
